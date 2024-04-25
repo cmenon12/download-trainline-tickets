@@ -1,0 +1,8 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "github>cmenon12/config(download-trainline-tickets)"
+  ],
+  "ignoreTests": false,
+  "schedule": "after 4pm on Friday"
+}
