@@ -6,12 +6,14 @@ __license__ = "gpl-3.0"
 
 import configparser
 import email
+from email.message import Message
 import imaplib
 import logging
 import time
 from datetime import datetime
 from pathlib import Path
 
+from bs4 import BeautifulSoup
 from pytz import timezone
 
 # The name of the config file
@@ -22,6 +24,33 @@ TIMEZONE = timezone("Europe/London")
 
 # The filename to use for the log file
 LOG_FILENAME = f"download-tickets-{datetime.now(tz=TIMEZONE).strftime('%Y-%m-%d-%H.%M.%S')}.txt"
+
+
+def parse_message(message: Message) -> list[str]:
+    """Parse the email message to extract the ticket URLs.
+
+    :param message: the email message to parse
+    :type message: email.message.Message
+    :return: the ticket URLs
+    :rtype: str
+    """
+
+    html = None
+    if message.is_multipart():
+        for part in message.get_payload():
+            if part.get_content_type() == "text/html":
+                html = part.get_payload(decode=True).decode()
+    else:
+        if message.get_content_type() == "text/html":
+            html = message.get_payload(decode=True).decode()
+
+    if html:
+        soup = BeautifulSoup(html, "html.parser")
+        urls = [a["href"] for a in soup.find_all("a", href=True) if
+                "download.thetrainline.com" in a["href"]]
+        return urls
+
+    return []
 
 
 def main():
@@ -55,6 +84,8 @@ def main():
             _, data = server.fetch(num, "(RFC822)")
             message = email.message_from_bytes(data[0][1])
             print(message)
+            urls = parse_message(message)
+            print(urls)
         server.close()
         server.logout()
 
