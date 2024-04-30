@@ -6,10 +6,13 @@ __license__ = "gpl-3.0"
 
 import configparser
 import email
+import re
 from email.message import Message
 import imaplib
 import logging
 import time
+
+import requests
 from datetime import datetime
 from pathlib import Path
 
@@ -53,6 +56,24 @@ def parse_message(message: Message) -> list[str]:
     return []
 
 
+def fetch_ticket(url: str) -> None:
+    """Fetch the ticket from the given URL.
+
+    :param url: the URL to fetch the ticket from
+    :type url: str
+    """
+
+    response = requests.get(url, timeout=10)
+    response.raise_for_status()
+    soup = BeautifulSoup(response.content, 'html.parser')
+    scripts = soup.find_all('script')
+    all_js = [script.string for script in scripts if script.string is not None]
+
+    pattern = r'{(.*?)}'
+    matches = re.findall(pattern, all_js[0], re.DOTALL)
+    js = matches[0].replace('\\r\\n', '\r\n')
+
+
 def main():
     """The main function to run the script."""
 
@@ -88,6 +109,8 @@ def main():
             message = email.message_from_bytes(data[0][1])
             urls = parse_message(message)
             LOGGER.debug("Found %s URLs.", len(urls))
+            for url in urls:
+                fetch_ticket(url)
         server.close()
         server.logout()
 
