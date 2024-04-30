@@ -70,6 +70,7 @@ def main():
     parser = configparser.ConfigParser()
     parser.read(CONFIG_FILENAME)
     email_config: configparser.SectionProxy = parser["email"]
+    LOGGER.debug("Loaded email config.")
 
     # Connect to IMAP server using IMAP4
     with imaplib.IMAP4_SSL(email_config["imap_host"],
@@ -80,12 +81,13 @@ def main():
         # Search for the emails
         _, data = server.search(None, '(FROM "auto-confirm@info.thetrainline.com" SUBJECT "Your '
                                       'eticket" SINCE 01-Jan-2024)')
+        LOGGER.debug("Found %s emails.", len(data[0].split()))
         for num in data[0].split():
+            LOGGER.debug("Processing email %s.", num)
             _, data = server.fetch(num, "(RFC822)")
             message = email.message_from_bytes(data[0][1])
-            print(message)
             urls = parse_message(message)
-            print(urls)
+            LOGGER.debug("Found %s URLs.", len(urls))
         server.close()
         server.logout()
 
