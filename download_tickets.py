@@ -5,6 +5,8 @@ __credits__ = "Christopher Menon"
 __license__ = "gpl-3.0"
 
 import configparser
+import email
+import imaplib
 import logging
 import time
 from datetime import datetime
@@ -40,7 +42,21 @@ def main():
     parser.read(CONFIG_FILENAME)
     email_config: configparser.SectionProxy = parser["email"]
 
-    print(email_config)
+    # Connect to IMAP server using IMAP4
+    with imaplib.IMAP4_SSL(email_config["imap_host"],
+                           int(email_config["imap_port"])) as server:
+        server.login(email_config["username"], email_config["password"])
+        server.select("inbox", readonly=True)
+
+        # Search for the emails
+        _, data = server.search(None, '(FROM "auto-confirm@info.thetrainline.com" SUBJECT "Your '
+                                      'eticket" SINCE 01-Jan-2024)')
+        for num in data[0].split():
+            _, data = server.fetch(num, "(RFC822)")
+            message = email.message_from_bytes(data[0][1])
+            print(message)
+        server.close()
+        server.logout()
 
 
 if __name__ == "__main__":
