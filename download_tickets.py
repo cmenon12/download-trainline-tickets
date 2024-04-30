@@ -11,7 +11,9 @@ import logging
 import re
 import time
 from datetime import datetime
+from email import encoders
 from email.message import Message
+from email.mime.base import MIMEBase
 from pathlib import Path
 
 import requests
@@ -55,11 +57,13 @@ def parse_message(message: Message) -> list[str]:
     return []
 
 
-def fetch_ticket(url: str) -> None:
+def fetch_ticket(url: str) -> MIMEBase:
     """Fetch the ticket from the given URL.
 
     :param url: the URL to fetch the ticket from
     :type url: str
+    :return: the PDF ticket as a MIMEBase object
+    :rtype: email.mime.base.MIMEBase
     """
 
     # Fetch the HTML with the JavaScript redirect
@@ -80,6 +84,17 @@ def fetch_ticket(url: str) -> None:
     # Download the ticket
     response = session.get(f"https://download.thetrainline.com/resource/{req_id}", timeout=10)
     response.raise_for_status()
+
+    # Save the ticket to a MIMEBase object
+    pdf = MIMEBase("application", "pdf")
+    pdf.set_payload(response.content)
+    encoders.encode_base64(pdf)
+    pdf.add_header("Content-Disposition",
+                   response.headers["Content-Disposition"])
+    pdf.add_header("Content-Description",
+                   response.headers["Content-Disposition"].split("filename=")[1])
+
+    return pdf
 
 
 def main():
@@ -103,7 +118,7 @@ def main():
 
     # Connect to IMAP server using IMAP4
     with imaplib.IMAP4_SSL(email_config["imap_host"],
-                           int(email_config["imap_port"]),) as server:
+                           int(email_config["imap_port"])) as server:
         server.login(email_config["username"], email_config["password"])
         server.select("inbox", readonly=True)
 
