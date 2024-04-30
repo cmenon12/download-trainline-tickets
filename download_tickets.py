@@ -6,16 +6,15 @@ __license__ = "gpl-3.0"
 
 import configparser
 import email
-import re
-from email.message import Message
 import imaplib
 import logging
+import re
 import time
-
-import requests
 from datetime import datetime
+from email.message import Message
 from pathlib import Path
 
+import requests
 from bs4 import BeautifulSoup
 from pytz import timezone
 
@@ -63,15 +62,24 @@ def fetch_ticket(url: str) -> None:
     :type url: str
     """
 
-    response = requests.get(url, timeout=10)
+    # Fetch the HTML with the JavaScript redirect
+    session = requests.Session()
+    response = session.get(url, timeout=10)
     response.raise_for_status()
     soup = BeautifulSoup(response.content, 'html.parser')
     scripts = soup.find_all('script')
     all_js = [script.string for script in scripts if script.string is not None]
 
-    pattern = r'{(.*?)}'
-    matches = re.findall(pattern, all_js[0], re.DOTALL)
-    js = matches[0].replace('\\r\\n', '\r\n')
+    # Prepare second request with the request ID
+    pattern = r"var requestId = '(.*?)';"
+    match = re.search(pattern, all_js[0])
+    req_id = match.group(1)
+    token = url.split("#")[1]
+    session.cookies.set(f"token-{req_id}", token)
+
+    # Download the ticket
+    response = session.get(f"https://download.thetrainline.com/resource/{req_id}", timeout=10)
+    response.raise_for_status()
 
 
 def main():
@@ -95,7 +103,7 @@ def main():
 
     # Connect to IMAP server using IMAP4
     with imaplib.IMAP4_SSL(email_config["imap_host"],
-                           int(email_config["imap_port"])) as server:
+                           int(email_config["imap_port"]),) as server:
         server.login(email_config["username"], email_config["password"])
         server.select("inbox", readonly=True)
 
