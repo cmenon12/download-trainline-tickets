@@ -1,18 +1,24 @@
 """Script to download Trainline tickets from an email inbox."""
 
+from __future__ import annotations
+
 __author__ = "Christopher Menon"
 __credits__ = "Christopher Menon"
 __license__ = "gpl-3.0"
 
 import configparser
 import email
-from email.message import Message
 import imaplib
 import logging
+import re
 import time
 from datetime import datetime
+from email import encoders
+from email.message import Message
+from email.mime.base import MIMEBase
 from pathlib import Path
 
+import requests
 from bs4 import BeautifulSoup
 from pytz import timezone
 
@@ -53,6 +59,60 @@ def parse_message(message: Message) -> list[str]:
     return []
 
 
+def fetch_ticket(url: str) -> MIMEBase | None:
+    """Fetch the ticket from the given URL.
+
+    :param url: the URL to fetch the ticket from
+    :type url: str
+    :return: the PDF ticket as a MIMEBase object
+    :rtype: email.mime.base.MIMEBase | None
+    """
+
+    # Fetch the HTML with the JavaScript redirect
+    LOGGER.debug("Fetching ticket from %s.", url)
+    session = requests.Session()
+    response = session.get(url, timeout=10)
+    response.raise_for_status()
+    soup = BeautifulSoup(response.content, 'html.parser')
+    scripts = soup.find_all('script')
+    all_js = [script.string for script in scripts if script.string is not None]
+
+    # Prepare second request with the request ID
+    pattern = r"var requestId = '(.*?)';"
+    match = re.search(pattern, all_js[0])
+    if not match:
+        LOGGER.warning("Could not find the request ID in the JavaScript, skipping.")
+        return None
+    req_id = match.group(1)
+    token = url.split("#")[1]
+    session.cookies.set(f"token-{req_id}", token)
+    LOGGER.debug("Set cookie token-%s=%s", req_id, token)
+
+    # Download the ticket
+    url = f"https://download.thetrainline.com/resource/{req_id}"
+    LOGGER.debug("Downloading ticket PDF from %s.", url)
+    response = session.get(url, timeout=10)
+    response.raise_for_status()
+
+    # Stop if this is not a PDF file
+    # Some links are to add the ticket to Google/Apple Wallet
+    if response.headers["Content-Type"] != "application/pdf":
+        LOGGER.warning("The ticket is not a PDF file, skipping.")
+        return None
+
+    # Save the ticket to a MIMEBase object
+    pdf = MIMEBase("application", "pdf")
+    pdf.set_payload(response.content)
+    encoders.encode_base64(pdf)
+    pdf.add_header("Content-Disposition",
+                   response.headers["Content-Disposition"])
+    filename = response.headers["Content-Disposition"].split("filename=")[1]
+    pdf.add_header("Content-Description", filename)
+    LOGGER.debug("Downloaded ticket %s.", filename)
+
+    return pdf
+
+
 def main():
     """The main function to run the script."""
 
@@ -70,13 +130,13 @@ def main():
     parser = configparser.ConfigParser()
     parser.read(CONFIG_FILENAME)
     email_config: configparser.SectionProxy = parser["email"]
-    LOGGER.debug("Loaded email config.")
 
     # Connect to IMAP server using IMAP4
     with imaplib.IMAP4_SSL(email_config["imap_host"],
                            int(email_config["imap_port"])) as server:
         server.login(email_config["username"], email_config["password"])
         server.select("inbox", readonly=True)
+        LOGGER.debug("Connected to the IMAP server.")
 
         # Search for the emails
         _, data = server.search(None, '(FROM "auto-confirm@info.thetrainline.com" SUBJECT "Your '
@@ -88,6 +148,8 @@ def main():
             message = email.message_from_bytes(data[0][1])
             urls = parse_message(message)
             LOGGER.debug("Found %s URLs.", len(urls))
+            for url in urls:
+                fetch_ticket(url)
         server.close()
         server.logout()
 
