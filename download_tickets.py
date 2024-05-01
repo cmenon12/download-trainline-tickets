@@ -67,6 +67,7 @@ def fetch_ticket(url: str) -> MIMEBase:
     """
 
     # Fetch the HTML with the JavaScript redirect
+    LOGGER.debug("Fetching ticket from %s.", url)
     session = requests.Session()
     response = session.get(url, timeout=10)
     response.raise_for_status()
@@ -80,9 +81,12 @@ def fetch_ticket(url: str) -> MIMEBase:
     req_id = match.group(1)
     token = url.split("#")[1]
     session.cookies.set(f"token-{req_id}", token)
+    LOGGER.debug("Set cookie token-%s=%s", req_id, token)
 
     # Download the ticket
-    response = session.get(f"https://download.thetrainline.com/resource/{req_id}", timeout=10)
+    url = f"https://download.thetrainline.com/resource/{req_id}"
+    LOGGER.debug("Downloading ticket PDF from %s.", url)
+    response = session.get(url, timeout=10)
     response.raise_for_status()
 
     # Save the ticket to a MIMEBase object
@@ -91,8 +95,9 @@ def fetch_ticket(url: str) -> MIMEBase:
     encoders.encode_base64(pdf)
     pdf.add_header("Content-Disposition",
                    response.headers["Content-Disposition"])
-    pdf.add_header("Content-Description",
-                   response.headers["Content-Disposition"].split("filename=")[1])
+    filename = response.headers["Content-Disposition"].split("filename=")[1]
+    pdf.add_header("Content-Description", filename)
+    LOGGER.debug("Downloaded ticket %s.", filename)
 
     return pdf
 
@@ -114,13 +119,13 @@ def main():
     parser = configparser.ConfigParser()
     parser.read(CONFIG_FILENAME)
     email_config: configparser.SectionProxy = parser["email"]
-    LOGGER.debug("Loaded email config.")
 
     # Connect to IMAP server using IMAP4
     with imaplib.IMAP4_SSL(email_config["imap_host"],
                            int(email_config["imap_port"])) as server:
         server.login(email_config["username"], email_config["password"])
         server.select("inbox", readonly=True)
+        LOGGER.debug("Connected to the IMAP server.")
 
         # Search for the emails
         _, data = server.search(None, '(FROM "auto-confirm@info.thetrainline.com" SUBJECT "Your '
