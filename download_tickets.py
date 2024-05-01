@@ -1,5 +1,7 @@
 """Script to download Trainline tickets from an email inbox."""
 
+from __future__ import annotations
+
 __author__ = "Christopher Menon"
 __credits__ = "Christopher Menon"
 __license__ = "gpl-3.0"
@@ -57,13 +59,13 @@ def parse_message(message: Message) -> list[str]:
     return []
 
 
-def fetch_ticket(url: str) -> MIMEBase:
+def fetch_ticket(url: str) -> MIMEBase | None:
     """Fetch the ticket from the given URL.
 
     :param url: the URL to fetch the ticket from
     :type url: str
     :return: the PDF ticket as a MIMEBase object
-    :rtype: email.mime.base.MIMEBase
+    :rtype: email.mime.base.MIMEBase | None
     """
 
     # Fetch the HTML with the JavaScript redirect
@@ -78,6 +80,9 @@ def fetch_ticket(url: str) -> MIMEBase:
     # Prepare second request with the request ID
     pattern = r"var requestId = '(.*?)';"
     match = re.search(pattern, all_js[0])
+    if not match:
+        LOGGER.warning("Could not find the request ID in the JavaScript, skipping.")
+        return None
     req_id = match.group(1)
     token = url.split("#")[1]
     session.cookies.set(f"token-{req_id}", token)
@@ -88,6 +93,12 @@ def fetch_ticket(url: str) -> MIMEBase:
     LOGGER.debug("Downloading ticket PDF from %s.", url)
     response = session.get(url, timeout=10)
     response.raise_for_status()
+
+    # Stop if this is not a PDF file
+    # Some links are to add the ticket to Google/Apple Wallet
+    if response.headers["Content-Type"] != "application/pdf":
+        LOGGER.warning("The ticket is not a PDF file, skipping.")
+        return None
 
     # Save the ticket to a MIMEBase object
     pdf = MIMEBase("application", "pdf")
