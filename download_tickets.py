@@ -32,6 +32,9 @@ TIMEZONE = timezone("Europe/London")
 # The date format to use for email dates
 EMAIL_DATE_FORMAT = "%a, %d %b %Y %H:%M:%S %z (UTC)"
 
+# The string to use for the email ID
+EMAIl_ID_STRING = "cmenon12-download-trainline-tickets"
+
 # The filename to use for the log file
 LOG_FILENAME = f"download-tickets-{datetime.now(tz=TIMEZONE).strftime('%Y-%m-%d-%H.%M.%S')}.txt"
 
@@ -121,6 +124,32 @@ def fetch_tickets(urls: list[str]) -> list[MIMEBase]:
     return tickets
 
 
+def check_if_already_processed(server: imaplib.IMAP4_SSL, message: Message) -> bool:
+    """Check if the email has already been processed.
+
+    :param server: the IMAP server
+    :type server: imaplib.IMAP4_SSL
+    :param message: the email message
+    :type message: email.message.Message
+    :return: True if the email has already been processed, False otherwise
+    :rtype: bool
+    """
+
+    _, items = server.search(None, f'(HEADER In-Reply-To "{message["Message-ID"]}")')
+    items = items[0].split()
+
+    # Get each email
+    for email_id in items:
+        _, data = server.fetch(email_id, "(RFC822)")
+        email_message = email.message_from_bytes(data[0][1])
+
+        # If the message ID contains the ID from this script, it has been processed
+        if EMAIl_ID_STRING in email_message["Message-ID"]:
+            return True
+
+    return False
+
+
 def prepare_ticket_email(tickets: list[MIMEBase], message: Message,
                          email_config: configparser.SectionProxy) -> MIMEMultipart:
     """Prepare an email with the tickets.
@@ -184,12 +213,27 @@ def main():
                                       'eticket" SINCE 01-Jan-2024)')
         LOGGER.debug("Found %s emails.", len(data[0].split()))
         for num in data[0].split():
-            LOGGER.debug("Processing email %s.", num)
+            LOGGER.debug("Fetching email %s.", num)
             _, data = server.fetch(num, "(RFC822)")
             message = email.message_from_bytes(data[0][1])
+            LOGGER.debug("Fetched email %s.", message["Subject"])
+
+            # Check if the email has already been processed
+            if check_if_already_processed(server, message):
+                LOGGER.debug("Email has already been processed, skipping.")
+                continue
+
+            # Check if the email is a ticket email
             urls = parse_message(message)
             LOGGER.debug("Found %s URLs.", len(urls))
+            if len(urls) == 0:
+                LOGGER.debug("Email does not contain any ticket URLs, skipping.")
+                continue
             tickets = fetch_tickets(urls)
+            LOGGER.debug("Found %s tickets.", len(tickets))
+            if len(tickets) == 0:
+                LOGGER.debug("Could not fetch any tickets, skipping.")
+                continue
             ticket_email = prepare_ticket_email(tickets, message, email_config)
             server.append("inbox", None,
                           datetime.strptime(message["Date"], EMAIL_DATE_FORMAT) + timedelta(
