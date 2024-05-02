@@ -131,11 +131,14 @@ def check_if_already_processed(server: imaplib.IMAP4_SSL, message: Message) -> b
     :type server: imaplib.IMAP4_SSL
     :param message: the email message
     :type message: email.message.Message
-    :return: True if the email has already been processed, False otherwise
+    :return: False if the email has not already been processed, otherwise True
     :rtype: bool
     """
 
-    _, items = server.search(None, f'(HEADER In-Reply-To "{message["Message-ID"]}")')
+    status, items = server.search(None, f'(HEADER Subject "Re {message["Subject"]}")')
+    if status != "OK":
+        LOGGER.error("Could not search for emails.")
+        return True
     items = items[0].split()
 
     # Get each email
