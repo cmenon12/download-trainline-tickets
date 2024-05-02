@@ -246,7 +246,7 @@ def main():
                 LOGGER.debug("Could not fetch any tickets, skipping.")
                 continue
             ticket_email = prepare_ticket_email(tickets, message, email_config)
-            status = server.append("inbox", None,
+            status = server.append("inbox", "\\Seen",
                           datetime.strptime(message["Date"], EMAIL_DATE_FORMAT) + timedelta(
                               minutes=10), ticket_email.as_bytes())
             if status[0] == "OK":
