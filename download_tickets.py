@@ -11,6 +11,7 @@ import email
 import imaplib
 import logging
 import re
+import sys
 import time
 from datetime import datetime, timedelta
 from email import encoders
@@ -172,7 +173,8 @@ def prepare_ticket_email(tickets: list[MIMEBase], message: Message,
     ticket_email["Subject"] = f"Re: {message['Subject']}"
     ticket_email["To"] = message["To"]
     ticket_email["From"] = email_config["from"]
-    date = (datetime.strptime(message["Date"], EMAIL_DATE_FORMAT) + timedelta(minutes=10)).strftime(EMAIL_DATE_FORMAT)
+    date = (datetime.strptime(message["Date"], EMAIL_DATE_FORMAT) + timedelta(minutes=10)).strftime(
+        EMAIL_DATE_FORMAT)
     LOGGER.debug("Setting the date to %s.", date)
     ticket_email["Date"] = date
     email_id = email.utils.make_msgid(idstring=EMAIl_ID_STRING, domain=email_config["smtp_host"])
@@ -214,24 +216,25 @@ def main():
         LOGGER.debug("Connected to the IMAP server.")
 
         # Search for the emails
-        status, items = server.search(None, '(FROM "auto-confirm@info.thetrainline.com" SUBJECT "Your '
+        status, items = server.search(None,
+                                      '(FROM "auto-confirm@info.thetrainline.com" SUBJECT "Your '
                                       'eticket" SINCE 01-Jan-2024)')
         if status != "OK":
             LOGGER.error("Could not search for emails.")
             return
         LOGGER.debug("Found %s emails.", len(items[0].split()))
         for num in items[0].split():
-            LOGGER.info("Fetching email %s.", num)
+            LOGGER.debug("Fetching email %s.", num)
             status, data = server.fetch(num, "(RFC822)")
             if status != "OK":
                 LOGGER.error("Could not fetch the email.")
                 continue
             message = email.message_from_bytes(data[0][1])
-            LOGGER.debug("Fetched email %s.", message["Subject"])
+            LOGGER.info("Fetched email %s.", message["Subject"])
 
             # Check if the email has already been processed
             if check_if_already_processed(server, message):
-                LOGGER.debug("Email has already been processed, skipping.")
+                LOGGER.info("Email has already been processed, skipping.")
                 continue
 
             # Check if the email is a ticket email
@@ -247,29 +250,41 @@ def main():
                 continue
             ticket_email = prepare_ticket_email(tickets, message, email_config)
             status = server.append("inbox", "\\Seen",
-                          datetime.strptime(message["Date"], EMAIL_DATE_FORMAT) + timedelta(
-                              minutes=10), ticket_email.as_bytes())
+                                   datetime.strptime(message["Date"],
+                                                     EMAIL_DATE_FORMAT) + timedelta(
+                                       minutes=10), ticket_email.as_bytes())
             if status[0] == "OK":
-                LOGGER.info("Successfully saved the email with the tickets.")
+                LOGGER.info("Successfully saved the email with the %s tickets.", len(tickets))
             else:
                 LOGGER.error("Could not save the email with the tickets.")
+        LOGGER.info("Finished processing %s emails.", len(items[0].split()))
         server.close()
         server.logout()
+        LOGGER.debug("Logged out of the IMAP server.")
 
 
 if __name__ == "__main__":
 
     # Prepare the log
     Path("./logs").mkdir(parents=True, exist_ok=True)
-    logging.basicConfig(
-        format="%(asctime)s | %(levelname)5s in %(module)s.%(funcName)s() on line %(lineno)-3d | "
-               "%(message)s",
-        level=logging.DEBUG,
-        handlers=[
-            logging.FileHandler(
-                f"./logs/{LOG_FILENAME}",
-                mode="a",
-                encoding="utf-8")])
+    formatter = logging.Formatter(
+        "%(asctime)s | %(levelname)5s in %(module)s.%(funcName)s() on line %(lineno)-3d | %(message)s"
+    )
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(logging.INFO)
+
+    file_handler = logging.FileHandler(
+        f"./logs/{LOG_FILENAME}",
+        encoding="utf-8"
+    )
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(logging.DEBUG)
+
+    LOGGER = logging.getLogger()
+    LOGGER.setLevel(logging.DEBUG)
+    LOGGER.addHandler(console_handler)
+    LOGGER.addHandler(file_handler)
     LOGGER = logging.getLogger(__name__)
 
     # Run it
