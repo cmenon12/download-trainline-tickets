@@ -177,7 +177,7 @@ def prepare_ticket_email(tickets: list[MIMEBase], message: Message,
         EMAIL_DATE_FORMAT)
     LOGGER.debug("Setting the date to %s.", date)
     ticket_email["Date"] = date
-    email_id = email.utils.make_msgid(idstring=EMAIl_ID_STRING, domain=email_config["smtp_host"])
+    email_id = email.utils.make_msgid(idstring=EMAIl_ID_STRING, domain=email_config["imap_host"])
     LOGGER.debug("Email ID is %s.", email_id)
     ticket_email["Message-ID"] = email_id
     ticket_email["In-Reply-To"] = message["Message-ID"]
