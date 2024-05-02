@@ -120,7 +120,7 @@ def fetch_tickets(urls: list[str]) -> list[MIMEBase]:
         filename = response.headers["Content-Disposition"].split("filename=")[1]
         pdf.add_header("Content-Description", filename)
         tickets.append(pdf)
-        LOGGER.debug("Downloaded ticket %s.", filename)
+        LOGGER.info("Downloaded ticket %s.", filename)
 
     return tickets
 
@@ -268,7 +268,7 @@ if __name__ == "__main__":
     # Prepare the log
     Path("./logs").mkdir(parents=True, exist_ok=True)
     formatter = logging.Formatter(
-        "%(asctime)s | %(levelname)5s in %(module)s.%(funcName)s() on line %(lineno)-3d | %(message)s"
+        "%(asctime)s | %(levelname)5s in %(funcName)s() on line %(lineno)-3d | %(message)s"
     )
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
