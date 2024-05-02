@@ -59,58 +59,62 @@ def parse_message(message: Message) -> list[str]:
     return []
 
 
-def fetch_ticket(url: str) -> MIMEBase | None:
-    """Fetch the ticket from the given URL.
+def fetch_tickets(urls: list[str]) -> list[MIMEBase]:
+    """Fetch the tickets from the given URLs.
 
-    :param url: the URL to fetch the ticket from
-    :type url: str
-    :return: the PDF ticket as a MIMEBase object
-    :rtype: email.mime.base.MIMEBase | None
+    :param urls: a list of URLs to fetch the tickets from
+    :type urls: list[str]
+    :return: a list of PDF tickets as MIMEBase objects
+    :rtype: list[email.mime.base.MIMEBase]
     """
 
-    # Fetch the HTML with the JavaScript redirect
-    LOGGER.debug("Fetching ticket from %s.", url)
-    session = requests.Session()
-    response = session.get(url, timeout=10)
-    response.raise_for_status()
-    soup = BeautifulSoup(response.content, 'html.parser')
-    scripts = soup.find_all('script')
-    all_js = [script.string for script in scripts if script.string is not None]
+    tickets = []
+    for url in urls:
 
-    # Prepare second request with the request ID
-    pattern = r"var requestId = '(.*?)';"
-    match = re.search(pattern, all_js[0])
-    if not match:
-        LOGGER.warning("Could not find the request ID in the JavaScript, skipping.")
-        return None
-    req_id = match.group(1)
-    token = url.split("#")[1]
-    session.cookies.set(f"token-{req_id}", token)
-    LOGGER.debug("Set cookie token-%s=%s", req_id, token)
+        # Fetch the HTML with the JavaScript redirect
+        LOGGER.debug("Fetching ticket from %s.", url)
+        session = requests.Session()
+        response = session.get(url, timeout=10)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        scripts = soup.find_all('script')
+        all_js = [script.string for script in scripts if script.string is not None]
 
-    # Download the ticket
-    url = f"https://download.thetrainline.com/resource/{req_id}"
-    LOGGER.debug("Downloading ticket PDF from %s.", url)
-    response = session.get(url, timeout=10)
-    response.raise_for_status()
+        # Prepare second request with the request ID
+        pattern = r"var requestId = '(.*?)';"
+        match = re.search(pattern, all_js[0])
+        if not match:
+            LOGGER.warning("Could not find the request ID in the JavaScript, skipping.")
+            continue
+        req_id = match.group(1)
+        token = url.split("#")[1]
+        session.cookies.set(f"token-{req_id}", token)
+        LOGGER.debug("Set cookie token-%s=%s", req_id, token)
 
-    # Stop if this is not a PDF file
-    # Some links are to add the ticket to Google/Apple Wallet
-    if response.headers["Content-Type"] != "application/pdf":
-        LOGGER.warning("The ticket is not a PDF file, skipping.")
-        return None
+        # Download the ticket
+        url = f"https://download.thetrainline.com/resource/{req_id}"
+        LOGGER.debug("Downloading ticket PDF from %s.", url)
+        response = session.get(url, timeout=10)
+        response.raise_for_status()
 
-    # Save the ticket to a MIMEBase object
-    pdf = MIMEBase("application", "pdf")
-    pdf.set_payload(response.content)
-    encoders.encode_base64(pdf)
-    pdf.add_header("Content-Disposition",
-                   response.headers["Content-Disposition"])
-    filename = response.headers["Content-Disposition"].split("filename=")[1]
-    pdf.add_header("Content-Description", filename)
-    LOGGER.debug("Downloaded ticket %s.", filename)
+        # Stop if this is not a PDF file
+        # Some links are to add the ticket to Google/Apple Wallet
+        if response.headers["Content-Type"] != "application/pdf":
+            LOGGER.warning("The ticket is not a PDF file, skipping.")
+            continue
 
-    return pdf
+        # Save the ticket to a MIMEBase object
+        pdf = MIMEBase("application", "pdf")
+        pdf.set_payload(response.content)
+        encoders.encode_base64(pdf)
+        pdf.add_header("Content-Disposition",
+                       response.headers["Content-Disposition"])
+        filename = response.headers["Content-Disposition"].split("filename=")[1]
+        pdf.add_header("Content-Description", filename)
+        tickets.append(pdf)
+        LOGGER.debug("Downloaded ticket %s.", filename)
+
+    return tickets
 
 
 def main():
@@ -148,8 +152,7 @@ def main():
             message = email.message_from_bytes(data[0][1])
             urls = parse_message(message)
             LOGGER.debug("Found %s URLs.", len(urls))
-            for url in urls:
-                fetch_ticket(url)
+            tickets = fetch_tickets(urls)
         server.close()
         server.logout()
 
