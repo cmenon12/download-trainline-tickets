@@ -10,6 +10,7 @@ import configparser
 import email
 import imaplib
 import logging
+import pickle
 import re
 import sys
 import time
@@ -29,6 +30,8 @@ CONFIG_FILENAME = "config.ini"
 
 # The timezone to use throughout
 TIMEZONE = timezone("Europe/London")
+
+COMPLETED_IDS_FILE = "completed_ids.pickle"
 
 # The date format to use for email dates
 EMAIL_DATE_FORMAT = "%a, %d %b %Y %H:%M:%S %z (UTC)"
@@ -125,20 +128,27 @@ def fetch_tickets(urls: list[str]) -> list[MIMEBase]:
     return tickets
 
 
-def check_if_already_processed(server: imaplib.IMAP4_SSL, message: Message) -> bool:
+def check_if_already_processed(server: imaplib.IMAP4_SSL, message: Message, completed_ids: list[str]) -> bool:
     """Check if the email has already been processed.
 
     :param server: the IMAP server
     :type server: imaplib.IMAP4_SSL
     :param message: the email message
     :type message: email.message.Message
+    :param completed_ids: the list of completed message IDs
+    :type completed_ids: list[str]
     :return: False if the email has not already been processed, otherwise True
     :rtype: bool
     """
 
+    # Check if the email ID has been marked as completed
+    if message["Message-ID"] in completed_ids:
+        LOGGER.info("Email has already been processed (saved ID), skipping.")
+        return True
+
     status, items = server.search(None, f'(HEADER Subject "Re {message["Subject"]}")')
     if status != "OK":
-        LOGGER.error("Could not search for emails.")
+        LOGGER.error("Could not search for emails, skipping.")
         return True
     items = items[0].split()
 
@@ -149,6 +159,8 @@ def check_if_already_processed(server: imaplib.IMAP4_SSL, message: Message) -> b
 
         # If the message ID contains the ID from this script, it has been processed
         if EMAIl_ID_STRING in email_message["Message-ID"]:
+            completed_ids.append(message["Message-ID"])
+            LOGGER.info("Email has already been processed (found in inbox), skipping.")
             return True
 
     return False
@@ -208,6 +220,18 @@ def main():
     parser.read(CONFIG_FILENAME)
     email_config: configparser.SectionProxy = parser["email"]
 
+    # Get the previously completed message IDs
+    if Path(COMPLETED_IDS_FILE).exists():
+        completed_ids: list[str] = pickle.load(open(COMPLETED_IDS_FILE, "rb"))
+        if not isinstance(completed_ids, list):
+            completed_ids = []
+            LOGGER.warning("The completed IDs file is not a list, starting fresh.")
+        else:
+            LOGGER.info("Loaded %s completed message IDs.", len(completed_ids))
+    else:
+        completed_ids = []
+        LOGGER.info("No completed IDs file found, starting fresh.")
+
     # Connect to IMAP server using IMAP4
     with imaplib.IMAP4_SSL(email_config["imap_host"],
                            int(email_config["imap_port"])) as server:
@@ -233,8 +257,10 @@ def main():
             LOGGER.info("Fetched email %s.", message["Subject"])
 
             # Check if the email has already been processed
-            if check_if_already_processed(server, message):
-                LOGGER.info("Email has already been processed, skipping.")
+            if check_if_already_processed(server, message, completed_ids):
+                if message["Message-ID"] not in completed_ids:
+                    completed_ids.append(message["Message-ID"])
+                    LOGGER.debug("Saving the message ID %s to the completed_ids.", message["Message-ID"])
                 continue
 
             # Check if the email is a ticket email
@@ -255,9 +281,14 @@ def main():
                                        minutes=10), ticket_email.as_bytes())
             if status[0] == "OK":
                 LOGGER.info("Successfully saved the email with the %s tickets.", len(tickets))
+                completed_ids.append(message["Message-ID"])
+                LOGGER.debug("Saving the message ID %s to the completed_ids.",
+                             message["Message-ID"])
             else:
                 LOGGER.error("Could not save the email with the tickets.")
         LOGGER.info("Finished processing %s emails.", len(items[0].split()))
+        pickle.dump(completed_ids, open(COMPLETED_IDS_FILE, "wb"))
+        LOGGER.info("Saved %s completed message IDs.", len(completed_ids))
         server.close()
         server.logout()
         LOGGER.debug("Logged out of the IMAP server.")
