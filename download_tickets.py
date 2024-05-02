@@ -220,7 +220,7 @@ def main():
             LOGGER.error("Could not search for emails.")
             return
         LOGGER.debug("Found %s emails.", len(items[0].split()))
-        for num in items[0].split()[0:3]:
+        for num in items[0].split():
             LOGGER.info("Fetching email %s.", num)
             status, data = server.fetch(num, "(RFC822)")
             if status != "OK":
