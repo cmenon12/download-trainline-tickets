@@ -43,6 +43,27 @@ EMAIl_ID_STRING = "cmenon12-download-trainline-tickets"
 LOG_FILENAME = f"download-tickets-{datetime.now(tz=TIMEZONE).strftime('%Y-%m-%d-%H.%M.%S')}.txt"
 
 
+def get_completed_ids() -> set[str]:
+    """Get the set of completed message IDs.
+
+    :return: the set of completed message IDs
+    :rtype: set[str]
+    """
+
+    if Path(COMPLETED_IDS_FILE).exists():
+        completed_ids: set[str] = pickle.load(open(COMPLETED_IDS_FILE, "rb"))
+        if not isinstance(completed_ids, set):
+            completed_ids = set()
+            LOGGER.warning("The completed IDs file is not a set, starting fresh.")
+        else:
+            LOGGER.info("Loaded %s completed message IDs.", len(completed_ids))
+    else:
+        completed_ids = set()
+        LOGGER.info("No completed IDs file found, starting fresh.")
+
+    return completed_ids
+
+
 def parse_message(message: Message) -> list[str]:
     """Parse the email message to extract the ticket URLs.
 
@@ -128,15 +149,16 @@ def fetch_tickets(urls: list[str]) -> list[MIMEBase]:
     return tickets
 
 
-def check_if_already_processed(server: imaplib.IMAP4_SSL, message: Message, completed_ids: list[str]) -> bool:
+def check_if_already_processed(server: imaplib.IMAP4_SSL, message: Message,
+                               completed_ids: set[str]) -> bool:
     """Check if the email has already been processed.
 
     :param server: the IMAP server
     :type server: imaplib.IMAP4_SSL
     :param message: the email message
     :type message: email.message.Message
-    :param completed_ids: the list of completed message IDs
-    :type completed_ids: list[str]
+    :param completed_ids: the set of completed message IDs
+    :type completed_ids: set[str]
     :return: False if the email has not already been processed, otherwise True
     :rtype: bool
     """
@@ -159,7 +181,6 @@ def check_if_already_processed(server: imaplib.IMAP4_SSL, message: Message, comp
 
         # If the message ID contains the ID from this script, it has been processed
         if EMAIl_ID_STRING in email_message["Message-ID"]:
-            completed_ids.append(message["Message-ID"])
             LOGGER.info("Email has already been processed (found in inbox), skipping.")
             return True
 
@@ -221,16 +242,7 @@ def main():
     email_config: configparser.SectionProxy = parser["email"]
 
     # Get the previously completed message IDs
-    if Path(COMPLETED_IDS_FILE).exists():
-        completed_ids: list[str] = pickle.load(open(COMPLETED_IDS_FILE, "rb"))
-        if not isinstance(completed_ids, list):
-            completed_ids = []
-            LOGGER.warning("The completed IDs file is not a list, starting fresh.")
-        else:
-            LOGGER.info("Loaded %s completed message IDs.", len(completed_ids))
-    else:
-        completed_ids = []
-        LOGGER.info("No completed IDs file found, starting fresh.")
+    completed_ids = get_completed_ids()
 
     # Connect to IMAP server using IMAP4
     with imaplib.IMAP4_SSL(email_config["imap_host"],
@@ -258,9 +270,7 @@ def main():
 
             # Check if the email has already been processed
             if check_if_already_processed(server, message, completed_ids):
-                if message["Message-ID"] not in completed_ids:
-                    completed_ids.append(message["Message-ID"])
-                    LOGGER.debug("Saving the message ID %s to the completed_ids.", message["Message-ID"])
+                completed_ids.add(message["Message-ID"])
                 continue
 
             # Check if the email is a ticket email
@@ -281,7 +291,7 @@ def main():
                                        minutes=10), ticket_email.as_bytes())
             if status[0] == "OK":
                 LOGGER.info("Successfully saved the email with the %s tickets.", len(tickets))
-                completed_ids.append(message["Message-ID"])
+                completed_ids.add(message["Message-ID"])
                 LOGGER.debug("Saving the message ID %s to the completed_ids.",
                              message["Message-ID"])
             else:
