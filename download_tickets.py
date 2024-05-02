@@ -16,6 +16,7 @@ from datetime import datetime
 from email import encoders
 from email.message import Message
 from email.mime.base import MIMEBase
+from email.mime.multipart import MIMEMultipart
 from pathlib import Path
 
 import requests
@@ -117,6 +118,38 @@ def fetch_tickets(urls: list[str]) -> list[MIMEBase]:
     return tickets
 
 
+def prepare_ticket_email(tickets: list[MIMEBase], message: Message,
+                         email_config: configparser.SectionProxy) -> MIMEMultipart:
+    """Prepare an email with the tickets.
+
+    :param tickets: the tickets to save
+    :type tickets: list[email.mime.base.MIMEBase]
+    :param message: the original email message
+    :type message: email.message.Message
+    :param email_config: the email config
+    :type email_config: configparser.SectionProxy
+    :return: the email with the tickets attached
+    :rtype: email.mime.multipart.MIMEMultipart
+    """
+
+    # Create the message
+    ticket_email = MIMEMultipart("alternative")
+    ticket_email["Subject"] = f"Re: {message['Subject']}"
+    ticket_email["To"] = message["To"]
+    ticket_email["From"] = email_config["from"]
+    ticket_email["Date"] = email.utils.formatdate()
+    email_id = email.utils.make_msgid(domain=email_config["smtp_host"])
+    ticket_email["Message-ID"] = email_id
+    ticket_email["In-Reply-To"] = message["Message-ID"]
+    ticket_email["References"] = message["Message-ID"]
+
+    # Attach the tickets
+    for ticket in tickets:
+        ticket_email.attach(ticket)
+
+    return ticket_email
+
+
 def main():
     """The main function to run the script."""
 
@@ -153,6 +186,9 @@ def main():
             urls = parse_message(message)
             LOGGER.debug("Found %s URLs.", len(urls))
             tickets = fetch_tickets(urls)
+            ticket_email = prepare_ticket_email(tickets, message, email_config)
+            server.append("inbox", None, datetime.now(tz=TIMEZONE), ticket_email.as_bytes())
+            break
         server.close()
         server.logout()
 
