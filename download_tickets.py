@@ -12,7 +12,7 @@ import imaplib
 import logging
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from email import encoders
 from email.message import Message
 from email.mime.base import MIMEBase
@@ -28,6 +28,9 @@ CONFIG_FILENAME = "config.ini"
 
 # The timezone to use throughout
 TIMEZONE = timezone("Europe/London")
+
+# The date format to use for email dates
+EMAIL_DATE_FORMAT = "%a, %d %b %Y %H:%M:%S %z (UTC)"
 
 # The filename to use for the log file
 LOG_FILENAME = f"download-tickets-{datetime.now(tz=TIMEZONE).strftime('%Y-%m-%d-%H.%M.%S')}.txt"
@@ -137,8 +140,9 @@ def prepare_ticket_email(tickets: list[MIMEBase], message: Message,
     ticket_email["Subject"] = f"Re: {message['Subject']}"
     ticket_email["To"] = message["To"]
     ticket_email["From"] = email_config["from"]
-    ticket_email["Date"] = email.utils.formatdate()
-    email_id = email.utils.make_msgid(domain=email_config["smtp_host"])
+    date = datetime.strptime(message["Date"], EMAIL_DATE_FORMAT) + timedelta(minutes=10)
+    ticket_email["Date"] = date.strftime(EMAIL_DATE_FORMAT)
+    email_id = email.utils.make_msgid(idstring=EMAIl_ID_STRING, domain=email_config["smtp_host"])
     ticket_email["Message-ID"] = email_id
     ticket_email["In-Reply-To"] = message["Message-ID"]
     ticket_email["References"] = message["Message-ID"]
@@ -187,7 +191,9 @@ def main():
             LOGGER.debug("Found %s URLs.", len(urls))
             tickets = fetch_tickets(urls)
             ticket_email = prepare_ticket_email(tickets, message, email_config)
-            server.append("inbox", None, datetime.now(tz=TIMEZONE), ticket_email.as_bytes())
+            server.append("inbox", None,
+                          datetime.strptime(message["Date"], EMAIL_DATE_FORMAT) + timedelta(
+                              minutes=10), ticket_email.as_bytes())
             break
         server.close()
         server.logout()
