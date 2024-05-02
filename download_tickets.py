@@ -172,9 +172,11 @@ def prepare_ticket_email(tickets: list[MIMEBase], message: Message,
     ticket_email["Subject"] = f"Re: {message['Subject']}"
     ticket_email["To"] = message["To"]
     ticket_email["From"] = email_config["from"]
-    date = datetime.strptime(message["Date"], EMAIL_DATE_FORMAT) + timedelta(minutes=10)
-    ticket_email["Date"] = date.strftime(EMAIL_DATE_FORMAT)
+    date = (datetime.strptime(message["Date"], EMAIL_DATE_FORMAT) + timedelta(minutes=10)).strftime(EMAIL_DATE_FORMAT)
+    LOGGER.debug("Setting the date to %s.", date)
+    ticket_email["Date"] = date
     email_id = email.utils.make_msgid(idstring=EMAIl_ID_STRING, domain=email_config["smtp_host"])
+    LOGGER.debug("Email ID is %s.", email_id)
     ticket_email["Message-ID"] = email_id
     ticket_email["In-Reply-To"] = message["Message-ID"]
     ticket_email["References"] = message["Message-ID"]
@@ -212,12 +214,18 @@ def main():
         LOGGER.debug("Connected to the IMAP server.")
 
         # Search for the emails
-        _, data = server.search(None, '(FROM "auto-confirm@info.thetrainline.com" SUBJECT "Your '
+        status, items = server.search(None, '(FROM "auto-confirm@info.thetrainline.com" SUBJECT "Your '
                                       'eticket" SINCE 01-Jan-2024)')
-        LOGGER.debug("Found %s emails.", len(data[0].split()))
-        for num in data[0].split():
-            LOGGER.debug("Fetching email %s.", num)
-            _, data = server.fetch(num, "(RFC822)")
+        if status != "OK":
+            LOGGER.error("Could not search for emails.")
+            return
+        LOGGER.debug("Found %s emails.", len(items[0].split()))
+        for num in items[0].split()[0:3]:
+            LOGGER.info("Fetching email %s.", num)
+            status, data = server.fetch(num, "(RFC822)")
+            if status != "OK":
+                LOGGER.error("Could not fetch the email.")
+                continue
             message = email.message_from_bytes(data[0][1])
             LOGGER.debug("Fetched email %s.", message["Subject"])
 
@@ -238,10 +246,13 @@ def main():
                 LOGGER.debug("Could not fetch any tickets, skipping.")
                 continue
             ticket_email = prepare_ticket_email(tickets, message, email_config)
-            server.append("inbox", None,
+            status = server.append("inbox", None,
                           datetime.strptime(message["Date"], EMAIL_DATE_FORMAT) + timedelta(
                               minutes=10), ticket_email.as_bytes())
-            break
+            if status[0] == "OK":
+                LOGGER.info("Successfully saved the email with the tickets.")
+            else:
+                LOGGER.error("Could not save the email with the tickets.")
         server.close()
         server.logout()
 
