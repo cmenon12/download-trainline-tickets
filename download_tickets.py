@@ -295,9 +295,11 @@ def main():
         LOGGER.debug("Connected to the IMAP server.")
 
         # Search for the emails
+        since = datetime.now(tz=TIMEZONE).replace(microsecond=0) - timedelta(seconds=args["age"])
+        LOGGER.info("Searching for emails since %s.", since.isoformat())
         status, items = server.search(None,
-                                      '(FROM "auto-confirm@info.thetrainline.com" SUBJECT "Your '
-                                      'eticket" SINCE 01-Jan-2024)')
+                                      "(FROM \"auto-confirm@info.thetrainline.com\" SUBJECT \"Your "
+                                      f"eticket\" SINCE {(since - timedelta(days=1)).strftime('%d-%b-%Y')})")
         if status != "OK":
             LOGGER.error("Could not search for emails, exiting.")
             sys.exit("Could not search for emails.")
@@ -310,6 +312,11 @@ def main():
                 continue
             message = email.message_from_bytes(data[0][1])
             LOGGER.info("Fetched email %s.", message["Subject"])
+
+            # Check if the email is too old
+            if datetime.strptime(message["Date"], EMAIL_DATE_FORMAT) < since:
+                LOGGER.info("Email is too old, skipping.")
+                continue
 
             # Check if the email has already been processed
             if check_if_already_processed(server, message, completed_ids):
