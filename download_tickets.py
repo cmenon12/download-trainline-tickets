@@ -21,7 +21,7 @@ from email.message import Message
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import requests
 from bs4 import BeautifulSoup
@@ -215,19 +215,30 @@ def check_if_already_processed(server: imaplib.IMAP4_SSL, message: Message,
     return False
 
 
-def prepare_ticket_email(tickets: list[MIMEBase], message: Message,
-                         email_config: configparser.SectionProxy) -> MIMEMultipart:
+def prepare_ticket_email(message: Message, email_config: configparser.SectionProxy) -> Optional[MIMEMultipart]:
     """Prepare an email with the tickets.
 
-    :param tickets: the tickets to save
-    :type tickets: list[email.mime.base.MIMEBase]
     :param message: the original email message
     :type message: email.message.Message
     :param email_config: the email config
     :type email_config: configparser.SectionProxy
     :return: the email with the tickets attached
-    :rtype: email.mime.multipart.MIMEMultipart
+    :rtype: Optional[email.mime.multipart.MIMEMultipart]
     """
+
+    # Get the ticket URLs
+    urls = parse_message(message)
+    if len(urls) == 0:
+        LOGGER.debug("Email does not contain any ticket URLs, skipping.")
+        return None
+    LOGGER.debug("Found %s URLs.", len(urls))
+
+    # Get the tickets
+    tickets = fetch_tickets(urls)
+    if len(tickets) == 0:
+        LOGGER.debug("Could not fetch any tickets, skipping.")
+        return None
+    LOGGER.debug("Found %s tickets.", len(tickets))
 
     # Create the message
     ticket_email = MIMEMultipart("alternative")
@@ -305,29 +316,20 @@ def main():
                 completed_ids.add(message["Message-ID"])
                 continue
 
-            # Check if the email is a ticket email
-            urls = parse_message(message)
-            LOGGER.debug("Found %s URLs.", len(urls))
-            if len(urls) == 0:
-                LOGGER.debug("Email does not contain any ticket URLs, skipping.")
-                continue
-            tickets = fetch_tickets(urls)
-            LOGGER.debug("Found %s tickets.", len(tickets))
-            if len(tickets) == 0:
-                LOGGER.debug("Could not fetch any tickets, skipping.")
-                continue
-            ticket_email = prepare_ticket_email(tickets, message, email_config)
-            status = server.append("inbox", "\\Seen",
-                                   datetime.strptime(message["Date"],
-                                                     EMAIL_DATE_FORMAT) + timedelta(
-                                       minutes=10), ticket_email.as_bytes())
-            if status[0] == "OK":
-                LOGGER.info("Successfully saved the email with the %s tickets.", len(tickets))
-                completed_ids.add(message["Message-ID"])
-                LOGGER.debug("Saving the message ID %s to the completed_ids.",
-                             message["Message-ID"])
-            else:
-                LOGGER.error("Could not save the email with the tickets.")
+            # Download the tickets into an email
+            ticket_email = prepare_ticket_email(message, email_config)
+            if ticket_email:
+                status = server.append("inbox", "\\Seen",
+                                       datetime.strptime(message["Date"],
+                                                         EMAIL_DATE_FORMAT) + timedelta(
+                                           minutes=10), ticket_email.as_bytes())
+                if status[0] == "OK":
+                    LOGGER.info("Successfully saved the email with the tickets.")
+                    completed_ids.add(message["Message-ID"])
+                    LOGGER.debug("Saving the message ID %s to the completed_ids.",
+                                 message["Message-ID"])
+                else:
+                    LOGGER.error("Could not save the email with the tickets.")
         LOGGER.info("Finished processing %s emails.", len(items[0].split()))
         pickle.dump(completed_ids, open(COMPLETED_IDS_FILE, "wb"))
         LOGGER.info("Saved %s completed message IDs.", len(completed_ids))
