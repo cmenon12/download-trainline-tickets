@@ -66,7 +66,7 @@ def parse_args() -> dict[str, Any]:
         age = age.seconds
     else:
         LOGGER.error("Could not parse the age %s, exiting.", args.age)
-        sys.exit(1)
+        sys.exit(f"Could not parse the age {args.age}.")
 
     return {"age": age}
 
@@ -299,8 +299,8 @@ def main():
                                       '(FROM "auto-confirm@info.thetrainline.com" SUBJECT "Your '
                                       'eticket" SINCE 01-Jan-2024)')
         if status != "OK":
-            LOGGER.error("Could not search for emails.")
-            return
+            LOGGER.error("Could not search for emails, exiting.")
+            sys.exit("Could not search for emails.")
         LOGGER.debug("Found %s emails.", len(items[0].split()))
         for num in items[0].split():
             LOGGER.debug("Fetching email %s.", num)
