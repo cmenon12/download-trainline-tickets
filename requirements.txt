@@ -1,3 +1,4 @@
 beautifulsoup4==4.12.3
 pytz==2024.1
 requests==2.31.0
+timelength==2.0.2

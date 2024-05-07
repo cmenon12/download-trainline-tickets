@@ -14,16 +14,19 @@ import pickle
 import re
 import sys
 import time
+from argparse import ArgumentParser
 from datetime import datetime, timedelta
 from email import encoders
 from email.message import Message
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
+from typing import Any
 
 import requests
 from bs4 import BeautifulSoup
 from pytz import timezone
+from timelength import TimeLength
 
 # The name of the config file
 CONFIG_FILENAME = "config.ini"
@@ -41,6 +44,31 @@ EMAIl_ID_STRING = "cmenon12-download-trainline-tickets"
 
 # The filename to use for the log file
 LOG_FILENAME = f"download-tickets-{datetime.now(tz=TIMEZONE).strftime('%Y-%m-%d-%H.%M.%S')}.txt"
+
+
+def parse_args() -> dict[str, Any]:
+    """Parse the command-line arguments.
+
+    :return: the parsed arguments
+    :rtype: dict[str, Any]
+    """
+
+    # Get the arguments
+    parser = ArgumentParser()
+    parser.add_argument("-a", "--age", required=True,
+                        help="Max age of emails in human-readable format, e.g. \"1 day\" or \"6 "
+                             "hours\"")
+    args = parser.parse_args()
+
+    # Parse the age
+    age = TimeLength(args.age).result
+    if age.success:
+        age = age.seconds
+    else:
+        LOGGER.error("Could not parse the age %s, exiting.", args.age)
+        sys.exit(1)
+
+    return {"age": age}
 
 
 def get_completed_ids() -> set[str]:
@@ -225,6 +253,10 @@ def prepare_ticket_email(tickets: list[MIMEBase], message: Message,
 
 def main():
     """The main function to run the script."""
+
+    # Parse the args
+    args = parse_args()
+    LOGGER.info("Parsed the arguments: %s.", args)
 
     # Check that the config file exists
     try:
