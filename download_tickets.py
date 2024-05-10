@@ -43,7 +43,7 @@ EMAIL_DATE_FORMAT = "%a, %d %b %Y %H:%M:%S %z (UTC)"
 EMAIl_ID_STRING = "cmenon12-download-trainline-tickets"
 
 # The filename to use for the log file
-LOG_FILENAME = f"download-tickets-{datetime.now(tz=TIMEZONE).strftime('%Y-%m-%d-%H.%M.%S')}.txt"
+LOG_FILENAME = f"download-tickets-{datetime.now(tz=TIMEZONE).strftime('%Y-%m-%d')}.txt"
 
 
 def parse_args() -> dict[str, Any]:
@@ -367,7 +367,6 @@ if __name__ == "__main__":
     LOGGER.setLevel(logging.DEBUG)
     LOGGER.addHandler(console_handler)
     LOGGER.addHandler(file_handler)
-    LOGGER = logging.getLogger(__name__)
 
     # Run it
     main()
