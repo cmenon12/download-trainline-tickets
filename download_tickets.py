@@ -258,7 +258,7 @@ def prepare_ticket_email(message: Message,
     ticket_email["Subject"] = f"Re: {message['Subject']}"
     ticket_email["To"] = message["To"]
     ticket_email["From"] = email_config["from"]
-    date = (datetime.strptime(message["Date"], EMAIL_DATE_FORMAT) + timedelta(minutes=10)).strftime(
+    date = (datetime.strptime(message["Date"][:31], EMAIL_DATE_FORMAT) + timedelta(minutes=10)).strftime(
         EMAIL_DATE_FORMAT)
     LOGGER.debug("Setting the date to %s.", date)
     ticket_email["Date"] = date
@@ -378,7 +378,7 @@ def main():
             if ticket_email:
                 send_via_pushbullet(ticket_email, pb_config)
                 status = server.append("inbox", "\\Seen",
-                                       datetime.strptime(message["Date"],
+                                       datetime.strptime(message["Date"][:31],
                                                          EMAIL_DATE_FORMAT) + timedelta(
                                            minutes=10), ticket_email.as_bytes())
                 if status[0] == "OK":
