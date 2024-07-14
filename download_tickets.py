@@ -275,11 +275,11 @@ def prepare_ticket_email(message: Message,
     return ticket_email
 
 
-def send_via_pushbullet(message: MIMEMultipart, pb_config: configparser.SectionProxy) -> None:
+def send_via_pushbullet(ticket_email: MIMEMultipart, pb_config: configparser.SectionProxy) -> None:
     """Send the tickets via Pushbullet.
 
-    :param message: the email message with the tickets
-    :type message: email.mime.multipart.MIMEMultipart
+    :param ticket_email: the email message with the tickets
+    :type ticket_email: email.mime.multipart.MIMEMultipart
     :param pb_config: the Pushbullet config
     :type pb_config: configparser.SectionProxy
     """
@@ -293,7 +293,7 @@ def send_via_pushbullet(message: MIMEMultipart, pb_config: configparser.SectionP
     pb = Pushbullet(pb_config["pushbullet_access_token"])
 
     # Iterate over each part of the message
-    for part in message.walk():
+    for part in ticket_email.walk():
         if part.get_content_type() == "application/pdf":
 
             # Prepare the file to send
@@ -302,7 +302,7 @@ def send_via_pushbullet(message: MIMEMultipart, pb_config: configparser.SectionP
 
             # Upload and send the file
             LOGGER.info("Sending the ticket %s via Pushbullet.", filename)
-            file_data = pb.upload_file(file_bytes, filename)
+            file_data = pb.upload_file(file_bytes, filename, file_type="application/pdf")
             if pb_config.get("pushbullet_device", "false").lower() == "false":
                 pb.push_file(**file_data, device=pb_config.get("pushbullet_device"))
             else:
