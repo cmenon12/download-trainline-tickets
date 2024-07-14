@@ -9,8 +9,8 @@ __license__ = "gpl-3.0"
 import configparser
 import email
 import imaplib
+import json
 import logging
-import pickle
 import re
 import sys
 import time
@@ -21,6 +21,7 @@ from email.message import Message
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
+from pushbullet import Pushbullet
 from typing import Any, Optional
 
 import requests
@@ -34,10 +35,10 @@ CONFIG_FILENAME = "config.ini"
 # The timezone to use throughout
 TIMEZONE = timezone("Europe/London")
 
-COMPLETED_IDS_FILE = "completed_ids.pickle"
+COMPLETED_MESSAGES_FILE = "completed_messages.json"
 
 # The date format to use for email dates
-EMAIL_DATE_FORMAT = "%a, %d %b %Y %H:%M:%S %z (UTC)"
+EMAIL_DATE_FORMAT = "%a, %d %b %Y %H:%M:%S %z"
 
 # The string to use for the email ID
 EMAIl_ID_STRING = "cmenon12-download-trainline-tickets"
@@ -71,25 +72,30 @@ def parse_args() -> dict[str, Any]:
     return {"age": age}
 
 
-def get_completed_ids() -> set[str]:
-    """Get the set of completed message IDs.
+def get_completed_messages() -> list[dict[str, str]]:
+    """Get the list of completed messages.
 
-    :return: the set of completed message IDs
-    :rtype: set[str]
+    :return: the list of completed messages
+    :rtype: list[dict[str, str]]
     """
 
-    if Path(COMPLETED_IDS_FILE).exists():
-        completed_ids: set[str] = pickle.load(open(COMPLETED_IDS_FILE, "rb"))
-        if not isinstance(completed_ids, set):
-            completed_ids = set()
-            LOGGER.warning("The completed IDs file is not a set, starting fresh.")
+    completed = list()
+    if Path(COMPLETED_MESSAGES_FILE).exists():
+        try:
+            completed: list[dict[str, str]] = json.load(open(COMPLETED_MESSAGES_FILE, "r",
+                                                             encoding="utf-8"))
+        except json.JSONDecodeError:
+            completed = list()
+            LOGGER.warning("The completed messages file is not valid JSON, starting fresh.")
+        if not isinstance(completed, list):
+            completed = list()
+            LOGGER.warning("The completed messages file is not a list, starting fresh.")
         else:
-            LOGGER.info("Loaded %s completed message IDs.", len(completed_ids))
+            LOGGER.info("Loaded %s completed messages.", len(completed))
     else:
-        completed_ids = set()
-        LOGGER.info("No completed IDs file found, starting fresh.")
+        LOGGER.info("No completed messages file found, starting fresh.")
 
-    return completed_ids
+    return completed
 
 
 def parse_message(message: Message) -> list[str]:
@@ -155,6 +161,12 @@ def fetch_tickets(urls: list[str]) -> list[MIMEBase]:
         url = f"https://download.thetrainline.com/resource/{req_id}"
         LOGGER.debug("Downloading ticket PDF from %s.", url)
         response = session.get(url, timeout=10)
+
+        # Stop if the ticket doesn't exist in Trainline's system
+        if response.url == "https://www.thetrainline.com/error":
+            LOGGER.warning("Ticket no longer exists, skipping.")
+            continue
+
         response.raise_for_status()
 
         # Stop if this is not a PDF file
@@ -178,21 +190,21 @@ def fetch_tickets(urls: list[str]) -> list[MIMEBase]:
 
 
 def check_if_already_processed(server: imaplib.IMAP4_SSL, message: Message,
-                               completed_ids: set[str]) -> bool:
+                               completed: list[dict[str, str]]) -> bool:
     """Check if the email has already been processed.
 
     :param server: the IMAP server
     :type server: imaplib.IMAP4_SSL
     :param message: the email message
     :type message: email.message.Message
-    :param completed_ids: the set of completed message IDs
-    :type completed_ids: set[str]
+    :param completed: the list of completed messages
+    :type completed: list[dict[str, str]]
     :return: False if the email has not already been processed, otherwise True
     :rtype: bool
     """
 
     # Check if the email ID has been marked as completed
-    if message["Message-ID"] in completed_ids:
+    if message["Message-ID"] in [c["id"] for c in completed]:
         LOGGER.info("Email has already been processed (saved ID), skipping.")
         return True
 
@@ -215,7 +227,8 @@ def check_if_already_processed(server: imaplib.IMAP4_SSL, message: Message,
     return False
 
 
-def prepare_ticket_email(message: Message, email_config: configparser.SectionProxy) -> Optional[MIMEMultipart]:
+def prepare_ticket_email(message: Message,
+                         email_config: configparser.SectionProxy) -> Optional[MIMEMultipart]:
     """Prepare an email with the tickets.
 
     :param message: the original email message
@@ -245,7 +258,7 @@ def prepare_ticket_email(message: Message, email_config: configparser.SectionPro
     ticket_email["Subject"] = f"Re: {message['Subject']}"
     ticket_email["To"] = message["To"]
     ticket_email["From"] = email_config["from"]
-    date = (datetime.strptime(message["Date"], EMAIL_DATE_FORMAT) + timedelta(minutes=10)).strftime(
+    date = (datetime.strptime(message["Date"][:31], EMAIL_DATE_FORMAT) + timedelta(minutes=10)).strftime(
         EMAIL_DATE_FORMAT)
     LOGGER.debug("Setting the date to %s.", date)
     ticket_email["Date"] = date
@@ -260,6 +273,40 @@ def prepare_ticket_email(message: Message, email_config: configparser.SectionPro
         ticket_email.attach(ticket)
 
     return ticket_email
+
+
+def send_via_pushbullet(ticket_email: MIMEMultipart, pb_config: configparser.SectionProxy) -> None:
+    """Send the tickets via Pushbullet.
+
+    :param ticket_email: the email message with the tickets
+    :type ticket_email: email.mime.multipart.MIMEMultipart
+    :param pb_config: the Pushbullet config
+    :type pb_config: configparser.SectionProxy
+    """
+
+    # Skip if the access token is not present
+    if pb_config.get("pushbullet_access_token", "false").lower() == "false":
+        LOGGER.info("Pushbullet config is incomplete, skipping.")
+        return
+
+    # Connect to Pushbullet
+    pb = Pushbullet(pb_config["pushbullet_access_token"])
+
+    # Iterate over each part of the message
+    for part in ticket_email.walk():
+        if part.get_content_type() == "application/pdf":
+
+            # Prepare the file to send
+            filename = part.get_filename()
+            file_bytes = part.get_payload(decode=True)
+
+            # Upload and send the file
+            LOGGER.info("Sending the ticket %s via Pushbullet.", filename)
+            file_data = pb.upload_file(file_bytes, filename, file_type="application/pdf")
+            if pb_config.get("pushbullet_device", "false").lower() == "false":
+                pb.push_file(**file_data, device=pb_config.get("pushbullet_device"))
+            else:
+                pb.push_file(**file_data)
 
 
 def main():
@@ -283,9 +330,10 @@ def main():
     parser = configparser.ConfigParser()
     parser.read(CONFIG_FILENAME)
     email_config: configparser.SectionProxy = parser["email"]
+    pb_config: configparser.SectionProxy = parser["pushbullet"]
 
     # Get the previously completed message IDs
-    completed_ids = get_completed_ids()
+    completed = get_completed_messages()
 
     # Connect to IMAP server using IMAP4
     with imaplib.IMAP4_SSL(email_config["imap_host"],
@@ -314,32 +362,38 @@ def main():
             LOGGER.info("Fetched email %s.", message["Subject"])
 
             # Check if the email is too old
-            if datetime.strptime(message["Date"], EMAIL_DATE_FORMAT) < since:
+            if datetime.strptime(message["Date"][:31], EMAIL_DATE_FORMAT) < since:
                 LOGGER.info("Email is too old, skipping.")
                 continue
 
             # Check if the email has already been processed
-            if check_if_already_processed(server, message, completed_ids):
-                completed_ids.add(message["Message-ID"])
+            if check_if_already_processed(server, message, completed):
+                if message["Message-ID"] not in [c["id"] for c in completed]:
+                    completed.append({"id": message["Message-ID"],
+                                      "date": message["Date"],
+                                      "subject": message["Subject"]})
                 continue
 
             # Download the tickets into an email
             ticket_email = prepare_ticket_email(message, email_config)
             if ticket_email:
+                send_via_pushbullet(ticket_email, pb_config)
                 status = server.append("inbox", "\\Seen",
-                                       datetime.strptime(message["Date"],
+                                       datetime.strptime(message["Date"][:31],
                                                          EMAIL_DATE_FORMAT) + timedelta(
                                            minutes=10), ticket_email.as_bytes())
                 if status[0] == "OK":
                     LOGGER.info("Successfully saved the email with the tickets.")
-                    completed_ids.add(message["Message-ID"])
-                    LOGGER.debug("Saving the message ID %s to the completed_ids.",
+                    completed.append({"id": message["Message-ID"],
+                                      "date": message["Date"],
+                                      "subject": message["Subject"]})
+                    LOGGER.debug("Saving the message ID %s to the completed messages.",
                                  message["Message-ID"])
                 else:
                     LOGGER.error("Could not save the email with the tickets.")
         LOGGER.info("Finished processing %s emails.", len(items[0].split()))
-        pickle.dump(completed_ids, open(COMPLETED_IDS_FILE, "wb"))
-        LOGGER.info("Saved %s completed message IDs.", len(completed_ids))
+        json.dump(list(completed), open(COMPLETED_MESSAGES_FILE, "w", encoding="utf-8"))
+        LOGGER.info("Saved %s completed message IDs.", len(completed))
         server.close()
         server.logout()
         LOGGER.debug("Logged out of the IMAP server.")
