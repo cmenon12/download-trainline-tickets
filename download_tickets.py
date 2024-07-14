@@ -384,8 +384,8 @@ def main():
                 if status[0] == "OK":
                     LOGGER.info("Successfully saved the email with the tickets.")
                     completed.append({"id": message["Message-ID"],
-                                   "date": message["Date"],
-                                   "subject": message["Subject"]})
+                                      "date": message["Date"],
+                                      "subject": message["Subject"]})
                     LOGGER.debug("Saving the message ID %s to the completed messages.",
                                  message["Message-ID"])
                 else:
