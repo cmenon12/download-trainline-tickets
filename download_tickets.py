@@ -9,8 +9,8 @@ __license__ = "gpl-3.0"
 import configparser
 import email
 import imaplib
+import json
 import logging
-import pickle
 import re
 import sys
 import time
@@ -35,7 +35,7 @@ CONFIG_FILENAME = "config.ini"
 # The timezone to use throughout
 TIMEZONE = timezone("Europe/London")
 
-COMPLETED_IDS_FILE = "completed_ids.pickle"
+COMPLETED_IDS_FILE = "completed_ids.json"
 
 # The date format to use for email dates
 EMAIL_DATE_FORMAT = "%a, %d %b %Y %H:%M:%S %z (UTC)"
@@ -80,11 +80,16 @@ def get_completed_ids() -> set[str]:
     """
 
     if Path(COMPLETED_IDS_FILE).exists():
-        completed_ids: set[str] = pickle.load(open(COMPLETED_IDS_FILE, "rb"))
-        if not isinstance(completed_ids, set):
+        try:
+            completed_ids = json.load(open(COMPLETED_IDS_FILE, "r"))
+        except json.JSONDecodeError:
             completed_ids = set()
-            LOGGER.warning("The completed IDs file is not a set, starting fresh.")
+            LOGGER.warning("The completed IDs file is not valid JSON, starting fresh.")
+        if not isinstance(completed_ids, list):
+            completed_ids = set()
+            LOGGER.warning("The completed IDs file is not a list, starting fresh.")
         else:
+            completed_ids = set(completed_ids)
             LOGGER.info("Loaded %s completed message IDs.", len(completed_ids))
     else:
         completed_ids = set()
@@ -375,7 +380,7 @@ def main():
                 else:
                     LOGGER.error("Could not save the email with the tickets.")
         LOGGER.info("Finished processing %s emails.", len(items[0].split()))
-        pickle.dump(completed_ids, open(COMPLETED_IDS_FILE, "wb"))
+        json.dump(list(completed_ids), open(COMPLETED_IDS_FILE, "w"))
         LOGGER.info("Saved %s completed message IDs.", len(completed_ids))
         server.close()
         server.logout()
