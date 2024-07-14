@@ -368,9 +368,10 @@ def main():
 
             # Check if the email has already been processed
             if check_if_already_processed(server, message, completed):
-                completed.append({"id": message["Message-ID"],
-                                  "date": message["Date"],
-                                  "subject": message["Subject"]})
+                if message["Message-ID"] not in [c["id"] for c in completed]:
+                    completed.append({"id": message["Message-ID"],
+                                      "date": message["Date"],
+                                      "subject": message["Subject"]})
                 continue
 
             # Download the tickets into an email
