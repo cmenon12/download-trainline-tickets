@@ -161,6 +161,12 @@ def fetch_tickets(urls: list[str]) -> list[MIMEBase]:
         url = f"https://download.thetrainline.com/resource/{req_id}"
         LOGGER.debug("Downloading ticket PDF from %s.", url)
         response = session.get(url, timeout=10)
+
+        # Stop if the ticket doesn't exist in Trainline's system
+        if response.url == "https://www.thetrainline.com/error":
+            LOGGER.warning("Ticket no longer exists, skipping.")
+            continue
+
         response.raise_for_status()
 
         # Stop if this is not a PDF file
