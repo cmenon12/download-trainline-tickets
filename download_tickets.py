@@ -38,7 +38,7 @@ TIMEZONE = timezone("Europe/London")
 COMPLETED_MESSAGES_FILE = "completed_messages.json"
 
 # The date format to use for email dates
-EMAIL_DATE_FORMAT = "%a, %d %b %Y %H:%M:%S %z (UTC)"
+EMAIL_DATE_FORMAT = "%a, %d %b %Y %H:%M:%S %z"
 
 # The string to use for the email ID
 EMAIl_ID_STRING = "cmenon12-download-trainline-tickets"
@@ -356,7 +356,7 @@ def main():
             LOGGER.info("Fetched email %s.", message["Subject"])
 
             # Check if the email is too old
-            if datetime.strptime(message["Date"], EMAIL_DATE_FORMAT) < since:
+            if datetime.strptime(message["Date"][:31], EMAIL_DATE_FORMAT) < since:
                 LOGGER.info("Email is too old, skipping.")
                 continue
 
