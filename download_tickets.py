@@ -21,6 +21,7 @@ from email.message import Message
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
+from pushbullet import Pushbullet
 from typing import Any, Optional
 
 import requests
@@ -262,6 +263,40 @@ def prepare_ticket_email(message: Message, email_config: configparser.SectionPro
     return ticket_email
 
 
+def send_via_pushbullet(message: MIMEMultipart, pb_config: configparser.SectionProxy) -> None:
+    """Send the tickets via Pushbullet.
+
+    :param message: the email message with the tickets
+    :type message: email.mime.multipart.MIMEMultipart
+    :param pb_config: the Pushbullet config
+    :type pb_config: configparser.SectionProxy
+    """
+
+    # Skip if the access token is not present
+    if pb_config.get("pushbullet_access_token", "false").lower() == "false":
+        LOGGER.info("Pushbullet config is incomplete, skipping.")
+        return
+
+    # Connect to Pushbullet
+    pb = Pushbullet(pb_config["pushbullet_access_token"])
+
+    # Iterate over each part of the message
+    for part in message.walk():
+        if part.get_content_type() == "application/pdf":
+
+            # Prepare the file to send
+            filename = part.get_filename()
+            file_bytes = part.get_payload(decode=True)
+
+            # Upload and send the file
+            LOGGER.info("Sending the ticket %s via Pushbullet.", filename)
+            file_data = pb.upload_file(file_bytes, filename)
+            if pb_config.get("pushbullet_device", "false").lower() == "false":
+                pb.push_file(**file_data, device=pb_config.get("pushbullet_device"))
+            else:
+                pb.push_file(**file_data)
+
+
 def main():
     """The main function to run the script."""
 
@@ -283,6 +318,7 @@ def main():
     parser = configparser.ConfigParser()
     parser.read(CONFIG_FILENAME)
     email_config: configparser.SectionProxy = parser["email"]
+    pb_config: configparser.SectionProxy = parser["pushbullet"]
 
     # Get the previously completed message IDs
     completed_ids = get_completed_ids()
@@ -326,6 +362,7 @@ def main():
             # Download the tickets into an email
             ticket_email = prepare_ticket_email(message, email_config)
             if ticket_email:
+                send_via_pushbullet(ticket_email, pb_config)
                 status = server.append("inbox", "\\Seen",
                                        datetime.strptime(message["Date"],
                                                          EMAIL_DATE_FORMAT) + timedelta(
