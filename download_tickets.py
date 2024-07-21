@@ -21,11 +21,11 @@ from email.message import Message
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
-from pushbullet import Pushbullet
 from typing import Any, Optional
 
 import requests
 from bs4 import BeautifulSoup
+from pushbullet import Pushbullet
 from pytz import timezone
 from timelength import TimeLength
 
@@ -42,6 +42,9 @@ EMAIL_DATE_FORMAT = "%a, %d %b %Y %H:%M:%S %z"
 
 # The string to use for the email ID
 EMAIl_ID_STRING = "cmenon12-download-trainline-tickets"
+
+# The MIME type of the tickets
+TICKET_FILE_TYPE = "application/pdf"
 
 # The filename to use for the log file
 LOG_FILENAME = f"download-tickets-{datetime.now(tz=TIMEZONE).strftime('%Y-%m-%d')}.txt"
@@ -82,7 +85,7 @@ def get_completed_messages() -> list[dict[str, str]]:
     completed = list()
     if Path(COMPLETED_MESSAGES_FILE).exists():
         try:
-            completed: list[dict[str, str]] = json.load(open(COMPLETED_MESSAGES_FILE, "r",
+            completed: list[dict[str, str]] = json.load(open(COMPLETED_MESSAGES_FILE,
                                                              encoding="utf-8"))
         except json.JSONDecodeError:
             completed = list()
@@ -171,7 +174,7 @@ def fetch_tickets(urls: list[str]) -> list[MIMEBase]:
 
         # Stop if this is not a PDF file
         # Some links are to add the ticket to Google/Apple Wallet
-        if response.headers["Content-Type"] != "application/pdf":
+        if response.headers["Content-Type"] != TICKET_FILE_TYPE:
             LOGGER.warning("The ticket is not a PDF file, skipping.")
             continue
 
@@ -217,6 +220,7 @@ def check_if_already_processed(server: imaplib.IMAP4_SSL, message: Message,
     # Get each email
     for email_id in items:
         _, data = server.fetch(email_id, "(RFC822)")
+        # noinspection PyUnresolvedReferences
         email_message = email.message_from_bytes(data[0][1])
 
         # If the message ID contains the ID from this script, it has been processed
@@ -258,8 +262,8 @@ def prepare_ticket_email(message: Message,
     ticket_email["Subject"] = f"Re: {message['Subject']}"
     ticket_email["To"] = message["To"]
     ticket_email["From"] = email_config["from"]
-    date = (datetime.strptime(message["Date"][:31], EMAIL_DATE_FORMAT) + timedelta(minutes=10)).strftime(
-        EMAIL_DATE_FORMAT)
+    date = (datetime.strptime(message["Date"][:31], EMAIL_DATE_FORMAT) +
+            timedelta(minutes=10)).strftime(EMAIL_DATE_FORMAT)
     LOGGER.debug("Setting the date to %s.", date)
     ticket_email["Date"] = date
     email_id = email.utils.make_msgid(idstring=EMAIl_ID_STRING, domain=email_config["imap_host"])
@@ -294,7 +298,7 @@ def send_via_pushbullet(ticket_email: MIMEMultipart, pb_config: configparser.Sec
 
     # Iterate over each part of the message
     for part in ticket_email.walk():
-        if part.get_content_type() == "application/pdf":
+        if part.get_content_type() == TICKET_FILE_TYPE:
 
             # Prepare the file to send
             filename = part.get_filename()
@@ -302,7 +306,7 @@ def send_via_pushbullet(ticket_email: MIMEMultipart, pb_config: configparser.Sec
 
             # Upload and send the file
             LOGGER.info("Sending the ticket %s via Pushbullet.", filename)
-            file_data = pb.upload_file(file_bytes, filename, file_type="application/pdf")
+            file_data = pb.upload_file(file_bytes, filename, file_type=TICKET_FILE_TYPE)
             if pb_config.get("pushbullet_device", "false").lower() == "false":
                 pb.push_file(**file_data, device=pb_config.get("pushbullet_device"))
             else:
@@ -345,9 +349,9 @@ def main():
         # Search for the emails
         since = datetime.now(tz=TIMEZONE).replace(microsecond=0) - timedelta(seconds=args["age"])
         LOGGER.info("Searching for emails since %s.", since.isoformat())
-        status, items = server.search(None,
-                                      "(FROM \"auto-confirm@info.thetrainline.com\" SUBJECT \"Your "
-                                      f"eticket\" SINCE {(since - timedelta(days=1)).strftime('%d-%b-%Y')})")
+        search_criteria = "(FROM \"auto-confirm@info.thetrainline.com\" SUBJECT \"Your " + \
+                          f"eticket\" SINCE {(since - timedelta(days=1)).strftime('%d-%b-%Y')})"
+        status, items = server.search(None, search_criteria)
         if status != "OK":
             LOGGER.error("Could not search for emails, exiting.")
             sys.exit("Could not search for emails.")
@@ -358,6 +362,7 @@ def main():
             if status != "OK":
                 LOGGER.error("Could not fetch the email.")
                 continue
+            # noinspection PyUnresolvedReferences
             message = email.message_from_bytes(data[0][1])
             LOGGER.info("Fetched email %s.", message["Subject"])
 
@@ -378,6 +383,7 @@ def main():
             ticket_email = prepare_ticket_email(message, email_config)
             if ticket_email:
                 send_via_pushbullet(ticket_email, pb_config)
+                # noinspection PyTypeChecker
                 status = server.append("inbox", "\\Seen",
                                        datetime.strptime(message["Date"][:31],
                                                          EMAIL_DATE_FORMAT) + timedelta(
