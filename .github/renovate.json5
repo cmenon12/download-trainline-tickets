@@ -4,5 +4,5 @@
     "github>cmenon12/config(download-trainline-tickets)"
   ],
   "ignoreTests": false,
-  "schedule": "after 4pm on Friday"
+  "schedule": "every 3 months on the first day of the month"
 }
