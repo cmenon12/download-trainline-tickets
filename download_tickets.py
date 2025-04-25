@@ -146,7 +146,7 @@ def fetch_tickets(urls: list[str]) -> list[MIMEBase]:
         response = session.get(url, timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
-        scripts = soup.find_all('script')
+        scripts = soup.find("body").find_all("script")
         all_js = [script.string for script in scripts if script.string is not None]
 
         # Prepare second request with the request ID
