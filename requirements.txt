@@ -1,5 +1,5 @@
 beautifulsoup4==4.13.5
 pushbullet.py==0.12.0
 pytz==2025.2
-requests==2.32.5
+requests==2.33.0
 timelength==3.0.2
